@@ -158,7 +158,7 @@ class SiteActivity : Activity() {
         s.javaScriptEnabled = true
         s.domStorageEnabled = true
         s.allowFileAccess = false
-        s.allowContentAccess = false
+        s.allowContentAccess = true   // picked gallery files are content:// URIs; the page must be able to read them to upload
         s.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
         s.mediaPlaybackRequiresUserGesture = false      // the live camera preview (a <video>) must start by itself
         web.setBackgroundColor(BG)
@@ -789,7 +789,20 @@ class SiteActivity : Activity() {
             chooserCb?.onReceiveValue(if (res == RESULT_OK && u != null) arrayOf(u) else null)
             chooserCb = null
         } else if (req == REQ_CHOOSE) {
-            chooserCb?.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(res, data))
+            var picked: Array<Uri>? = WebChromeClient.FileChooserParams.parseResult(res, data)
+            if (res == RESULT_OK && picked.isNullOrEmpty() && data != null) {
+                // some gallery apps return the picks only in ClipData (or a single data uri): collect them ourselves
+                val list = ArrayList<Uri>()
+                val cd = data.clipData
+                if (cd != null) for (k in 0 until cd.itemCount) cd.getItemAt(k).uri?.let { list.add(it) }
+                if (list.isEmpty()) data.data?.let { list.add(it) }
+                if (list.isNotEmpty()) picked = list.toTypedArray()
+            }
+            // keep read access alive until the page has finished uploading
+            picked?.forEach {
+                try { contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (e: Exception) {}
+            }
+            chooserCb?.onReceiveValue(picked)
             chooserCb = null
         } else if (req == REQ_TREE) {
             val d = pendingDl
